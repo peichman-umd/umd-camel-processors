@@ -22,18 +22,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
-public class SparqlQueryProcessor implements Processor {
+public class SparqlQueryProcessor implements Processor, Serializable {
   private Logger log = LoggerFactory.getLogger(SparqlQueryProcessor.class);
 
   public static final String CSV_WITHOUT_HEADER = "csvWithoutHeader";
 
-  private final String query;
-  private final String resultsFormatName;
+  private String query;
+
+  private String resultsFormatName;
 
   private Map<String, String> binding = new HashMap<>();
 
@@ -41,20 +43,7 @@ public class SparqlQueryProcessor implements Processor {
     return new String(Files.readAllBytes(Paths.get(file.toURI())));
   }
 
-  public SparqlQueryProcessor(File queryFile, String resultsFormatName) throws IOException {
-    this(getStringFromFile(queryFile), resultsFormatName);
-  }
-
-  public SparqlQueryProcessor(String query, String resultsFormatName) {
-    this.query = query;
-    this.resultsFormatName = resultsFormatName.trim();
-    ResultsFormat resultsFormat = ResultsFormat.lookup(resultsFormatName);
-
-    if ((resultsFormat == null) &&
-        !(CSV_WITHOUT_HEADER.toLowerCase().equals(resultsFormatName.toLowerCase()))) {
-      throw new IllegalArgumentException("Unknown resultFormatName: " + resultsFormatName);
-    }
-  }
+  public SparqlQueryProcessor() {}
 
   @Override
   public void process(final Exchange exchange) throws IOException {
@@ -136,5 +125,21 @@ public class SparqlQueryProcessor implements Processor {
 
   public void setBinding(Map<String, String> binding) {
     this.binding = binding;
+  }
+
+  public String getQuery() {
+    return query;
+  }
+
+  public void setQuery(String query) {
+    this.query = query;
+  }
+
+  public String getResultsFormatName() {
+    return resultsFormatName;
+  }
+
+  public void setResultsFormatName(String resultsFormatName) {
+    this.resultsFormatName = resultsFormatName;
   }
 }
