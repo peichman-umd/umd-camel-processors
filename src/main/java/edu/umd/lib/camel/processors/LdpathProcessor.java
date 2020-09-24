@@ -7,17 +7,15 @@ import org.apache.camel.Processor;
 import org.apache.marmotta.ldpath.LDPath;
 import org.apache.marmotta.ldpath.backend.linkeddata.LDCacheBackend;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.util.Map;
 
 public class LdpathProcessor implements Processor {
-    private final File ldpathQueryFile;
+    private String query;
+
     private final ObjectMapper objectMapper;
 
-    public LdpathProcessor(final File ldpathQueryFile) {
-        this.ldpathQueryFile = ldpathQueryFile;
+    public LdpathProcessor() {
         this.objectMapper = new ObjectMapper();
     }
 
@@ -27,9 +25,17 @@ public class LdpathProcessor implements Processor {
         final String uri = in.getHeader("FcrepoCamelUri", String.class);
         LDCacheBackend backend = new LDCacheBackend();
         LDPath ldpath = new LDPath(backend);
-        final Map<String, String> results = ldpath.programQuery(uri, new InputStreamReader(new FileInputStream(ldpathQueryFile)));
+        final Map<String, String> results = ldpath.programQuery(uri, new StringReader(query));
         final String json = objectMapper.writeValueAsString(results);
         in.setBody(json);
         in.setHeader("Content-Type", "application/json");
+    }
+
+    public String getQuery() {
+        return query;
+    }
+
+    public void setQuery(String query) {
+        this.query = query;
     }
 }
