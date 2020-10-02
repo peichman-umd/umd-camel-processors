@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -35,7 +36,7 @@ import static org.apache.jena.vocabulary.RDF.type;
  * Adapted from code in the fcrepo-camel-toolkit by Aaron Coburn and Esmé Cowles
  *
  */
-public class AuditPremisProcessor implements Processor {
+public class AuditPremisProcessor implements Processor, Serializable {
     private static final Logger log = LoggerFactory.getLogger(AuditPremisProcessor.class);
 
     private static final String AUDIT = "http://fedora.info/definitions/v4/audit#";
@@ -71,8 +72,10 @@ public class AuditPremisProcessor implements Processor {
         final Message in = exchange.getIn();
         final String eventURIBase = in.getHeader(EVENT_BASE_URI, String.class);
         final String eventID = in.getHeader(FCREPO_EVENT_ID, String.class);
+        final String fcrepoURI = in.getHeader(FCREPO_URI, String.class);
         final Resource eventURI = createResource(eventURIBase + "/" + eventID);
         final Optional<String> premisType = getAuditEventType(getEventTypes(in), getResourceTypes(in));
+        log.debug("Processing message for audit info for {} (MessageID: {})", fcrepoURI, in.getMessageId());
 
         // update exchange
         premisType.ifPresent(rdfType -> in.setHeader("CamelAuditEventType", rdfType));
