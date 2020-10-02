@@ -22,6 +22,12 @@
   </properties>
 
   <dependencies>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.13</version>
+      <scope>test</scope>
+    </dependency>
     <!-- Apache Camel -->
     <dependency>
       <groupId>org.apache.camel</groupId>
@@ -34,6 +40,7 @@
       <artifactId>apache-jena</artifactId>
       <version>${jena.version}</version>
       <type>pom</type>
+      <scope>compile</scope>
     </dependency>
     <!-- LDPath -->
     <dependency>
@@ -43,8 +50,18 @@
     </dependency>
     <dependency>
       <groupId>org.apache.marmotta</groupId>
+      <artifactId>ldclient-provider-rdf</artifactId>
+      <version>${ldpath.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.marmotta</groupId>
       <artifactId>ldpath-backend-linkeddata</artifactId>
       <version>${ldpath.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.semarglproject</groupId>
+      <artifactId>semargl-sesame</artifactId>
+      <version>0.6.1</version>
     </dependency>
   </dependencies>
 
