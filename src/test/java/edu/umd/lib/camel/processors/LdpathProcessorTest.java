@@ -12,7 +12,7 @@ import java.util.Map;
 import static org.junit.Assert.*;
 
 public class LdpathProcessorTest {
-    private final String uri = "http://localhost:8080/rest/dd/40/45/58/dd404558-f769-410c-8bda-8c8d892f67ad";
+    private final String uri = "http://localhost:8080/rest/af/c6/d8/20/afc6d820-427a-4932-9df5-3eb002958fd2";
 
     private String getResourceAsString(final String name) throws IOException {
         final InputStream resource = Thread.currentThread().getContextClassLoader().getResourceAsStream(name);

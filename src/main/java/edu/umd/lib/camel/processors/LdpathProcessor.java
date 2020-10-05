@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
+import org.apache.camel.RuntimeCamelException;
 import org.apache.marmotta.ldpath.LDPath;
 import org.apache.marmotta.ldpath.backend.linkeddata.LDCacheBackend;
 import org.apache.marmotta.ldpath.exception.LDPathParseException;
@@ -33,24 +34,24 @@ public class LdpathProcessor implements Processor, Serializable {
   }
 
   @Override
-  public void process(final Exchange exchange) throws LDPathParseException, JsonProcessingException {
+  public void process(final Exchange exchange) {
     final Message in = exchange.getIn();
     final String uri = in.getHeader("CamelFcrepoUri", String.class);
     logger.debug("Executing LDPath on {}", uri);
-    logger.trace(query);
+    logger.debug(query);
     String jsonResult;
     try {
       jsonResult = execute(uri);
     } catch (LDPathParseException e) {
       logger.error("LDPath parse error: {}", e.getMessage());
-      throw e;
+      throw new RuntimeCamelException("LDPath parse error", e);
     } catch (JsonProcessingException e) {
       logger.error("JSON processing error: {}", e.getMessage());
-      throw e;
+      throw new RuntimeCamelException("JSON processing error", e);
     }
     assert jsonResult != null;
     assert !jsonResult.isEmpty();
-    in.setBody(jsonResult);
+    in.setBody(jsonResult, String.class);
     in.setHeader("Content-Type", "application/json");
   }
 
