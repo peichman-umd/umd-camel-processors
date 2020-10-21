@@ -2,6 +2,7 @@ package edu.umd.lib.camel.processors;
 
 import edu.umd.lib.camel.utils.CsvWithoutHeaderOutput;
 import org.apache.camel.Exchange;
+import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.apache.jena.query.Query;
 import org.apache.jena.query.QueryExecution;
@@ -29,7 +30,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class SparqlQueryProcessor implements Processor, Serializable {
-  private Logger log = LoggerFactory.getLogger(SparqlQueryProcessor.class);
+  private final Logger logger = LoggerFactory.getLogger(SparqlQueryProcessor.class);
 
   public static final String CSV_WITHOUT_HEADER = "csvWithoutHeader";
 
@@ -37,7 +38,6 @@ public class SparqlQueryProcessor implements Processor, Serializable {
 
   private String resultsFormatName;
 
-  private Map<String, String> binding = new HashMap<>();
 
   private static String getStringFromFile(File file) throws IOException {
     return new String(Files.readAllBytes(Paths.get(file.toURI())));
@@ -46,29 +46,34 @@ public class SparqlQueryProcessor implements Processor, Serializable {
   public SparqlQueryProcessor() {}
 
   @Override
-  public void process(final Exchange exchange) throws IOException {
-    final Object body = exchange.getIn().getBody();
-    InputStream in = new ByteArrayInputStream((byte[]) body);
+  public void process(final Exchange exchange) {
+    final Message in = exchange.getIn();
+    final ByteArrayInputStream body = (ByteArrayInputStream) in.getBody();
+    in.setBody(executeQuery(body, getBindings(in)));
+  }
+
+  Map<String, String> getBindings(final Message message) {
+    final Map<String, String> bindings = new HashMap<>();
+
     // process headers for runtime bindings
-    log.info("checking headers for binding definitions");
-    for (Map.Entry<String, Object> entry : exchange.getIn().getHeaders().entrySet()) {
+    logger.info("Checking headers for binding definitions");
+    for (Map.Entry<String, Object> entry : message.getHeaders().entrySet()) {
       final String key = entry.getKey();
-      log.trace("Found key {}", key);
+      logger.trace("Found key {}", key);
       if (key.matches("^CamelSparqlQueryBinding-.+")) {
         final String bindingName = key.substring(key.indexOf("-") + 1);
         //TODO: verify bindingName is a valid SPARQL variable name
         final String bindingValue = (String) entry.getValue();
-        log.info("Adding binding {} with value {}", bindingName, bindingValue);
-        binding.put(bindingName, bindingValue);
+        logger.info("Adding binding {} with value {}", bindingName, bindingValue);
+        bindings.put(bindingName, bindingValue);
       }
     }
 
-    String result = executeQuery(in);
-    exchange.getIn().setBody(result);
+    return bindings;
   }
 
-  protected String executeQuery(InputStream in) {
-    log.debug("Executing query: {}, resultFormatName: {}", query, resultsFormatName);
+  protected String executeQuery(InputStream in, Map<String, String> bindings) {
+    logger.debug("Executing query: {}, resultFormatName: {}", query, resultsFormatName);
     Model model = ModelFactory.createDefaultModel();
     model.read(in, null);
 
@@ -79,7 +84,7 @@ public class SparqlQueryProcessor implements Processor, Serializable {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     try (QueryExecution qe = QueryExecutionFactory.create(q, model)) {
       if (q.isSelectType()) {
-        setInitialBindings(model, qe);
+        setInitialBindings(model, qe, bindings);
         ResultSet results = qe.execSelect();
 
         ResultsFormat resultsFormat = ResultsFormat.lookup(resultsFormatName);
@@ -94,7 +99,7 @@ public class SparqlQueryProcessor implements Processor, Serializable {
           ResultSetFormatter.output(out, results, resultsFormat);
         }
       } else if (q.isConstructType()) {
-        setInitialBindings(model, qe);
+        setInitialBindings(model, qe, bindings);
         Model results = qe.execConstruct();
         try {
           results.write(out, resultsFormatName);
@@ -109,22 +114,14 @@ public class SparqlQueryProcessor implements Processor, Serializable {
     return out.toString();
   }
 
-  private void setInitialBindings(Model model, QueryExecution qe) {
-    if (binding != null && !binding.isEmpty()) {
+  private void setInitialBindings(Model model, QueryExecution qe, Map<String, String> bindings) {
+    if (bindings != null && !bindings.isEmpty()) {
       QuerySolutionMap map = new QuerySolutionMap();
-      for (Map.Entry<String, String> b : binding.entrySet()) {
+      for (Map.Entry<String, String> b : bindings.entrySet()) {
         map.add(b.getKey(), model.createLiteral(b.getValue()));
       }
       qe.setInitialBinding(map);
     }
-  }
-
-  public Map<String, String> getBinding() {
-    return binding;
-  }
-
-  public void setBinding(Map<String, String> binding) {
-    this.binding = binding;
   }
 
   public String getQuery() {
