@@ -13,6 +13,7 @@ import org.apache.jena.query.ResultSet;
 import org.apache.jena.query.ResultSetFormatter;
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
+import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.shared.NoWriterForLangException;
 import org.apache.jena.sparql.resultset.ResultsFormat;
 import org.slf4j.Logger;
@@ -20,12 +21,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.Serializable;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -38,87 +34,104 @@ public class SparqlQueryProcessor implements Processor, Serializable {
 
   private String resultsFormatName;
 
-
-  private static String getStringFromFile(File file) throws IOException {
-    return new String(Files.readAllBytes(Paths.get(file.toURI())));
-  }
-
   public SparqlQueryProcessor() {}
 
   @Override
   public void process(final Exchange exchange) {
     final Message in = exchange.getIn();
-    final ByteArrayInputStream body = (ByteArrayInputStream) in.getBody();
-    in.setBody(executeQuery(body, getBindings(in)));
+    in.setBody(executeQuery(in));
   }
 
-  Map<String, String> getBindings(final Message message) {
-    final Map<String, String> bindings = new HashMap<>();
+  Map<String, RDFNode> parseBindings(final Message message, final Model model) {
+    final Map<String, RDFNode> bindings = new HashMap<>();
 
     // process headers for runtime bindings
     logger.info("Checking headers for binding definitions");
     for (Map.Entry<String, Object> entry : message.getHeaders().entrySet()) {
       final String key = entry.getKey();
       logger.trace("Found key {}", key);
-      if (key.matches("^CamelSparqlQueryBinding-.+")) {
-        final String bindingName = key.substring(key.indexOf("-") + 1);
-        //TODO: verify bindingName is a valid SPARQL variable name
+      if (key.matches("^CamelSparqlQueryBinding-Literal-.+")) {
+        final String bindingName = extractBindingName(key);
         final String bindingValue = (String) entry.getValue();
-        logger.info("Adding binding {} with value {}", bindingName, bindingValue);
-        bindings.put(bindingName, bindingValue);
+        logger.info("Binding ?{} to literal: \"{}\"", bindingName, bindingValue);
+        bindings.put(bindingName, model.createLiteral(bindingValue));
+      }
+      if (key.matches("^CamelSparqlQueryBinding-URI-.+")) {
+        final String bindingName = extractBindingName(key);
+        final String bindingValue = (String) entry.getValue();
+        logger.info("Binding ?{} to URI {}", bindingName, bindingValue);
+        bindings.put(bindingName, model.createResource(bindingValue));
       }
     }
 
     return bindings;
   }
 
-  protected String executeQuery(InputStream in, Map<String, String> bindings) {
+  private String extractBindingName(final String key) {
+    final String[] parts = key.split("-", 3);
+    logger.debug("Extracted {} from key name {}", parts[2], key);
+    //TODO: verify bindingName is a valid SPARQL variable name
+    return parts[2];
+  }
+
+  protected String executeQuery(Message in) {
     logger.debug("Executing query: {}, resultFormatName: {}", query, resultsFormatName);
-    Model model = ModelFactory.createDefaultModel();
-    model.read(in, null);
+    final ByteArrayInputStream body = (ByteArrayInputStream) in.getBody();
+    logger.debug("Got input stream (Message ID: {})", in.getMessageId());
+    // XXX: creating the default model appears to be where the Camel route is failing
+    final Model model = ModelFactory.createDefaultModel();
+    logger.debug("Created default model");
+    model.read(body, in.getHeader("CamelFcrepoUri", String.class), "RDF/XML");
+    logger.debug("Read message body into model");
+
+    final Map<String, RDFNode> bindings = parseBindings(in, model);
 
     // Create a new query
-    Query q = QueryFactory.create(query);
+    final Query q = QueryFactory.create(query);
 
     // Execute the query and obtain results
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    try (QueryExecution qe = QueryExecutionFactory.create(q, model)) {
-      if (q.isSelectType()) {
-        setInitialBindings(model, qe, bindings);
-        ResultSet results = qe.execSelect();
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    final QueryExecution qe = QueryExecutionFactory.create(q, model);
+    if (q.isSelectType()) {
+      logger.debug("Executing SELECT query");
+      setInitialBindings(qe, bindings);
+      final ResultSet results = qe.execSelect();
 
-        ResultsFormat resultsFormat = ResultsFormat.lookup(resultsFormatName);
-        if (resultsFormat == null) {
-          if ((resultsFormatName != null) && CSV_WITHOUT_HEADER.toLowerCase().equals(resultsFormatName.toLowerCase())) {
-            CsvWithoutHeaderOutput csvOutput = new CsvWithoutHeaderOutput();
-            csvOutput.format(out, results);
-          } else {
-            throw new IllegalArgumentException("Unknown resultFormatName: " + resultsFormatName);
-          }
+      final ResultsFormat resultsFormat = ResultsFormat.lookup(resultsFormatName);
+      if (resultsFormat == null) {
+        if ((resultsFormatName != null) && CSV_WITHOUT_HEADER.toLowerCase().equals(resultsFormatName.toLowerCase())) {
+          final CsvWithoutHeaderOutput csvOutput = new CsvWithoutHeaderOutput();
+          csvOutput.format(out, results);
         } else {
-          ResultSetFormatter.output(out, results, resultsFormat);
-        }
-      } else if (q.isConstructType()) {
-        setInitialBindings(model, qe, bindings);
-        Model results = qe.execConstruct();
-        try {
-          results.write(out, resultsFormatName);
-        } catch (NoWriterForLangException e) {
-          throw new IllegalArgumentException("Unknown resultFormatName: " + resultsFormatName);
+          logger.error("Unknown resultsFormatName: " + resultsFormatName);
+          throw new IllegalArgumentException("Unknown resultsFormatName: " + resultsFormatName);
         }
       } else {
-        throw new IllegalArgumentException("Only SELECT and CONSTRUCT queries are allowed as values of query");
+        ResultSetFormatter.output(out, results, resultsFormat);
       }
+    } else if (q.isConstructType()) {
+      logger.debug("Executing CONSTRUCT query");
+      setInitialBindings(qe, bindings);
+      final Model results = qe.execConstruct();
+      try {
+        results.write(out, resultsFormatName);
+      } catch (NoWriterForLangException e) {
+        logger.error("Unknown resultsFormatName: " + resultsFormatName);
+        throw new IllegalArgumentException("Unknown resultsFormatName: " + resultsFormatName);
+      }
+    } else {
+      logger.error("Only SELECT and CONSTRUCT queries are allowed as values of query");
+      throw new IllegalArgumentException("Only SELECT and CONSTRUCT queries are allowed as values of query");
     }
 
     return out.toString();
   }
 
-  private void setInitialBindings(Model model, QueryExecution qe, Map<String, String> bindings) {
+  private void setInitialBindings(QueryExecution qe, Map<String, RDFNode> bindings) {
     if (bindings != null && !bindings.isEmpty()) {
       QuerySolutionMap map = new QuerySolutionMap();
-      for (Map.Entry<String, String> b : bindings.entrySet()) {
-        map.add(b.getKey(), model.createLiteral(b.getValue()));
+      for (Map.Entry<String, RDFNode> b : bindings.entrySet()) {
+        map.add(b.getKey(), b.getValue());
       }
       qe.setInitialBinding(map);
     }
