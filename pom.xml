@@ -55,6 +55,14 @@
       <version>${jena.version}</version>
       <type>pom</type>
       <scope>compile</scope>
+     <exclusions>
+        <!-- Exclude log4j-slf4j-impl to avoid a SLF4J conflict with ActiveMQ's
+             own bundled SLF4J library.  -->
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-slf4j-impl</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <!-- LDPath -->
     <dependency>
