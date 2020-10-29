@@ -20,7 +20,7 @@
     <jena.version>3.16.0</jena.version>
     <junit.version>4.13</junit.version>
     <ldpath.version>3.3.0</ldpath.version>
-    <spring.version>5.2.9.RELEASE</spring.version>
+    <spring.version>4.3.18.RELEASE</spring.version>
   </properties>
 
   <dependencies>
