@@ -59,13 +59,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.umd.lib.fcrepo.AuthTokenService;
 
 /**
- * Ldoath Processor
+ * Processor that converts RDF triples into JSON, using an Apache Marmotta
+ * LDPath template.
+ * 
+ * When processing non-RDF resources (such as a PDF binary file), the
+ * processor will use the "describedBy" link in the HTTP headers to
+ * retrieve the RDF metadata.  
+ * 
+ * Note: This processor is intended for use in a Docker Swarm or Kubernetes
+ * stack, where the fcrepo web application is available on an "internal"
+ * container-based URL, which is separate from the "external" URL.
  */
 public class LdpathProcessor implements Processor, Serializable {
   private static final long serialVersionUID = 1L;
 
   private final Logger logger = LoggerFactory.getLogger(LdpathProcessor.class);
 
+  /**
+   * The HTTP Header Link value to use to identify non-RDF resources
+   */
+  private static final String NON_RDF_SOURCE_URI = "http://www.w3.org/ns/ldp#NonRDFSource";
+
+  /**
+   * The LDPath query for transforming RDF to JSON
+   */
   private String query;
 
   private final LDCachingBackend cachingBackend;
@@ -74,7 +91,6 @@ public class LdpathProcessor implements Processor, Serializable {
 
   private final ClientConfiguration clientConfig;
   
-  private final String NON_RDF_SOURCE_URI = "http://www.w3.org/ns/ldp#NonRDFSource";
 
   final ProxiedLinkedDataProvider provider;
   
@@ -99,14 +115,20 @@ public class LdpathProcessor implements Processor, Serializable {
   
   @Override
   public void process(final Exchange exchange) {
-    AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
-        exchange.getContext().getRegistry().lookupByName("addBearerAuthorization"); 
-    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
+    // Retrieve message headers
     final Message in = exchange.getIn();
     final String issuer = in.getHeader(USERNAME_HEADER_NAME, String.class);
     final String resourceURI = in.getHeader("CamelFcrepoUri", String.class);
     final String containerBasedUri = in.getHeader("CamelHttpUri", String.class);
     
+    // Generate an authorization token
+    AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
+        exchange.getContext().getRegistry().lookupByName("addBearerAuthorization"); 
+    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
+    final Date oneHourHence = Date.from(now().plus(1, HOURS));
+    final String authToken = authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
+
+    // Set up X-Forwarded headers
     URL resourceUrl;
     try {
       resourceUrl = new URL(resourceURI);
@@ -124,10 +146,6 @@ public class LdpathProcessor implements Processor, Serializable {
       forwardedHost = forwardedHost + ":"+ forwardedPort;
     }
 
-    // Create authorization token
-    final Date oneHourHence = Date.from(now().plus(1, HOURS));
-    final String authToken = authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
-    
     final List<Header> headers = new ArrayList<>();
     headers.add(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
     headers.add(new BasicHeader("X-Forwarded-Host", forwardedHost));
@@ -135,16 +153,20 @@ public class LdpathProcessor implements Processor, Serializable {
     for (Header h : headers) {
       logger.info("HTTP client header: {}: {}", h.getName(), h.getValue());
     }
-    
+
+    // Configure HttpClient for making resource request
     final HttpClient httpClient = HttpClientBuilder.create().setDefaultHeaders(headers).build();
     clientConfig.setHttpClient(httpClient);
+
+    // Get the URL for Linked Data
+    String linkedDataResourceUrl = getLinkedDataResourceUrl(authToken, containerBasedUri);
+    // Set linkedDataResourceUrl in the provider, so it can be retrieved in the "buildRequestUrl" method
+    provider.setLinkedDataMapping(resourceURI, linkedDataResourceUrl);
+
+    // Set up LDPath
     final CacheConfiguration cacheConfig = new CacheConfiguration(clientConfig);
     final LDCacheBackend cacheBackend = new LDCacheBackend(new LDCache(cacheConfig, cachingBackend));
     final LDPath<Value> ldpath = new LDPath<>(cacheBackend);
-
-    // Get the linked data resource url, if this is a non-RDF resource
-    String linkedDataResourceUrl = getLinkedDataResourceUrl(authToken, containerBasedUri);
-    provider.addLinkedDataMapping(resourceURI, linkedDataResourceUrl);
     
     logger.info("Sending request to {} for {}", containerBasedUri, resourceURI);
     logger.debug("LDPath query: {}", query);
@@ -160,6 +182,8 @@ public class LdpathProcessor implements Processor, Serializable {
     }
     assert jsonResult != null;
     assert !jsonResult.isEmpty();
+    
+    // Add the JSON result to the message
     in.setBody(jsonResult, String.class);
     in.setHeader("Content-Type", "application/json");
   }
@@ -227,7 +251,14 @@ public class LdpathProcessor implements Processor, Serializable {
     return result;
   }
 
-  Map<String, Collection<?>> executeQuery(final LDPath<Value> ldpath, final String uri) throws LDPathParseException {
+  /**
+   * Execute the LDPath query, Map
+   * 
+   * @param ldpath the LDPath class performing the query
+   * @param uri the "external" resource URI
+   * @return a Map containing the results of the query.
+   */
+  private Map<String, Collection<?>> executeQuery(final LDPath<Value> ldpath, final String uri) throws LDPathParseException {
     final Map<String, Collection<?>> results = ldpath.programQuery(new URIImpl(uri), new StringReader(query));
     for (Map.Entry<String, Collection<?>> entry : results.entrySet()) {
       logger.debug("LDPath result: Key: {} Value: {}", entry.getKey(), entry.getValue());
@@ -235,22 +266,44 @@ public class LdpathProcessor implements Processor, Serializable {
     return results;
   }
 
-  String execute(final LDPath<Value> ldpath, final String uri) throws LDPathParseException, JsonProcessingException {
+  /**
+   * Executes the LDPath query, returning a JSON-formatted string
+   * 
+   * @param ldpath the LDPath class performing the query
+   * @param uri the "external" resource URI
+   * @return a JSON-formatted string representing the results from the query.
+   * @throws LDPathParseException if an LDPath parsing problem occurs
+   * @throws JsonProcessingException if a JSON parsing problem occurs
+   */
+  private String execute(final LDPath<Value> ldpath, final String uri) throws LDPathParseException, JsonProcessingException {
     return objectMapper.writeValueAsString(executeQuery(ldpath, uri));
   }
 
+  /**
+   * Returns the LDPath query
+   * 
+   * @return the LDPath query
+   */
   public String getQuery() {
     return query;
   }
 
+  /**
+   * Sets the LDPAth query used to convert RDF to JSON
+   * 
+   * @param query the query
+   */
   public void setQuery(String query) {
     this.query = query;
   }
 }
 
 /**
-* LinkedDataProvider implementation that overrides the (external) request URL to provide an (internal) container-based
-* URL for a resource
+* LinkedDataProvider implementation that overrides the request URL, based on
+* a URL provided in a Map.
+* 
+* This enables an "internal" container-based URL to be used for retrieving the
+* resource, while maintaining the expected URL for the RDF triples.
 */
 class ProxiedLinkedDataProvider extends LinkedDataProvider {
   private static final Logger logger = LoggerFactory.getLogger(ProxiedLinkedDataProvider.class);
@@ -264,6 +317,13 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
     return PROVIDER_NAME;
   }
 
+  /**
+   * Returns either the linked data resource URL (if in the linkedDataMap), or
+   * the given resourceURI,
+   * 
+   * @param resourceUri the "external" URI of the resource being queried
+   * @param endpoint the Endpoint associated with the request.
+   */
   public List<String> buildRequestUrl(final String resourceUri, final Endpoint endpoint) {
     if (linkedDataMap.containsKey(resourceUri)) {
       String linkedDataResourceUrl = linkedDataMap.get(resourceUri);
@@ -276,7 +336,15 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
     return Collections.singletonList(resourceUri);
   }
   
-  public void addLinkedDataMapping(String resourceUri, String linkedDataResourceUrl) {
+  /**
+   * Sets a mapping between the "external" resourceUri, and the "internal"
+   * linkedDataResourceUrl. The mapping will be removed when the
+   * "buildRequestUrl" method is called. 
+   * 
+   * @param resourceUri the "external" resourceUri
+   * @param linkedDataResourceUrl the "internal" URL of the RDF metadata.
+   */
+  public void setLinkedDataMapping(String resourceUri, String linkedDataResourceUrl) {
     linkedDataMap.put(resourceUri, linkedDataResourceUrl);
   }
 }
