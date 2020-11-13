@@ -310,8 +310,8 @@ public class LdpathProcessor implements Processor, Serializable {
 * This enables an "internal" container-based URL to be used for retrieving the
 * resource, while maintaining the expected URL for the RDF triples.
 * 
-* This class falls back to using the "REPO_INTERNAL_URL" environment variable
-* to generate the URL, if a URL is not provided in the map.
+* This class relies on the "REPO_INTERNAL_URL" and "REPO_EXTERNAL_URL" environment
+* variables to properly convert URLs.
 */
 class ProxiedLinkedDataProvider extends LinkedDataProvider {
   private static final Logger logger = LoggerFactory.getLogger(ProxiedLinkedDataProvider.class);
@@ -321,6 +321,9 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
   private static Map<String, String> linkedDataMap = new HashMap<>();
   
   private static String repoInternalUrl;
+  
+  private static String repoExternalUrl;
+  
 
   public ProxiedLinkedDataProvider() {
     String repoInternalUrl = System.getenv("REPO_INTERNAL_URL");
@@ -328,8 +331,14 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
       repoInternalUrl = "http://repository:8080/rest";
       logger.warn("REPO_INTERNAL_URL environment variable not set. Using default of '{}", repoInternalUrl);
     }
-    
     ProxiedLinkedDataProvider.repoInternalUrl = repoInternalUrl;
+
+    String repoExternalUrl = System.getenv("REPO_EXTERNAL_URL");
+    if (repoExternalUrl == null) {
+      repoExternalUrl = "http://localhost:8080/rest";
+      logger.warn("REPO_EXTERNAL_URL environment variable not set. Using default of '{}", repoExternalUrl);
+    }
+    ProxiedLinkedDataProvider.repoExternalUrl = repoExternalUrl;
   }
   
   @Override
@@ -366,9 +375,8 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
     
     // Sometimes resources come through without being in the linkedDataMapKey
     // (not sure how this happens -- might be node traversal in LDPath?)
-    // In that case, use the repoInternalUrl to rewrite the resource.
-    logger.debug("resourceURL of '{}' not found in linkedDataMap. Processing using {}", resourceUri, repoInternalUrl);
-    
+    logger.debug("resourceURL of '{}' not found in linkedDataMap.", resourceUri);
+
     URL resourceURL;
     try {
       resourceURL = new URL(resourceUri);
@@ -376,7 +384,14 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
       logger.error("Malformed URL: {}", resourceUri);
       throw new IllegalArgumentException("Malformed URL: " + resourceUri, e);
     }
+
+    // If link does not match externalRepoUrl, then just return it
+    if (!resourceURL.toString().startsWith(repoExternalUrl)) {
+      logger.debug("resourceURL does not match repoExternalUrl, return '{}'", resourceURL);
+      return Collections.singletonList(resourceURL.toString());
+    }
     
+    // Otherwise, it matches, so use the repoInternalUrl to rewrite the resource,
     final String internalURL = new URIBuilder(repoInternalUrl)
         .setPath(resourceURL.getPath())
         .setEncodedQuery(resourceURL.getQuery())
