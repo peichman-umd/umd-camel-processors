@@ -47,6 +47,7 @@ import org.apache.marmotta.ldclient.provider.rdf.LinkedDataProvider;
 import org.apache.marmotta.ldpath.LDPath;
 import org.apache.marmotta.ldpath.backend.linkeddata.LDCacheBackend;
 import org.apache.marmotta.ldpath.exception.LDPathParseException;
+import org.jasig.cas.client.util.URIBuilder;
 import org.openrdf.model.Value;
 import org.openrdf.model.impl.URIImpl;
 import org.openrdf.repository.RepositoryException;
@@ -103,7 +104,7 @@ public class LdpathProcessor implements Processor, Serializable {
     endpoint.setType(ProxiedLinkedDataProvider.PROVIDER_NAME);
     endpoint.setPriority(PRIORITY_HIGH);
     clientConfig.addEndpoint(endpoint);
-
+    
     provider = new ProxiedLinkedDataProvider();
        
     Set<DataProvider> providers = new HashSet<>();
@@ -308,6 +309,9 @@ public class LdpathProcessor implements Processor, Serializable {
 * 
 * This enables an "internal" container-based URL to be used for retrieving the
 * resource, while maintaining the expected URL for the RDF triples.
+* 
+* This class falls back to using the "REPO_INTERNAL_URL" environment variable
+* to generate the URL, if a URL is not provided in the map.
 */
 class ProxiedLinkedDataProvider extends LinkedDataProvider {
   private static final Logger logger = LoggerFactory.getLogger(ProxiedLinkedDataProvider.class);
@@ -315,7 +319,19 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
   public static final String PROVIDER_NAME = "Proxied Linked Data";
   
   private static Map<String, String> linkedDataMap = new HashMap<>();
+  
+  private static String repoInternalUrl;
 
+  public ProxiedLinkedDataProvider() {
+    String repoInternalUrl = System.getenv("REPO_INTERNAL_URL");
+    if (repoInternalUrl == null) {
+      repoInternalUrl = "http://repository:8080/rest";
+      logger.warn("REPO_INTERNAL_URL environment variable not set. Using default of '{}", repoInternalUrl);
+    }
+    
+    ProxiedLinkedDataProvider.repoInternalUrl = repoInternalUrl;
+  }
+  
   @Override
   public String getName() {
     return PROVIDER_NAME;
@@ -348,8 +364,27 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
       }
     }
     
-    logger.debug("Returning unaltered resourceUri: {}", resourceUri);
-    return Collections.singletonList(resourceUri);
+    // Sometimes resources come through without being in the linkedDataMapKey
+    // (not sure how this happens -- might be node traversal in LDPath?)
+    // In that case, use the repoInternalUrl to rewrite the resource.
+    logger.debug("resourceURL of '{}' not found in linkedDataMap. Processing using {}", resourceUri, repoInternalUrl);
+    
+    URL resourceURL;
+    try {
+      resourceURL = new URL(resourceUri);
+    } catch (MalformedURLException e) {
+      logger.error("Malformed URL: {}", resourceUri);
+      throw new IllegalArgumentException("Malformed URL: " + resourceUri, e);
+    }
+    
+    final String internalURL = new URIBuilder(repoInternalUrl)
+        .setPath(resourceURL.getPath())
+        .setEncodedQuery(resourceURL.getQuery())
+        .build()
+        .toString();
+    
+    logger.debug("Returning modified URL of: {}", internalURL);
+    return Collections.singletonList(internalURL);
   }
   
   /**
