@@ -161,6 +161,7 @@ public class LdpathProcessor implements Processor, Serializable {
     // Get the URL for Linked Data
     String linkedDataResourceUrl = getLinkedDataResourceUrl(authToken, containerBasedUri);
     // Set linkedDataResourceUrl in the provider, so it can be retrieved in the "buildRequestUrl" method
+    logger.debug("Adding {} to setLinkedDataMapping with value of {}", resourceURI, linkedDataResourceUrl);
     provider.setLinkedDataMapping(resourceURI, linkedDataResourceUrl);
 
     // Set up LDPath
@@ -183,6 +184,9 @@ public class LdpathProcessor implements Processor, Serializable {
     assert jsonResult != null;
     assert !jsonResult.isEmpty();
     
+    logger.debug("Removing {} from linkedDataMapKey", resourceURI);
+    provider.removeLinkedDataMapping(resourceURI);
+
     // Add the JSON result to the message
     in.setBody(jsonResult, String.class);
     in.setHeader("Content-Type", "application/json");
@@ -325,14 +329,26 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
    * @param endpoint the Endpoint associated with the request.
    */
   public List<String> buildRequestUrl(final String resourceUri, final Endpoint endpoint) {
-    if (linkedDataMap.containsKey(resourceUri)) {
-      String linkedDataResourceUrl = linkedDataMap.get(resourceUri);
-      linkedDataMap.remove(resourceUri);
+    String linkedDataMapKey = resourceUri;
+    String fragment="";
+    if (linkedDataMapKey.contains("#")) {
+      logger.debug("Stripping fragment from {}", linkedDataMapKey);
+      // Strip off any URL fragments, as linkedDataMap keys won't have them. 
+      int hashIndex = resourceUri.indexOf("#");
+      fragment = resourceUri.substring(hashIndex);
+      linkedDataMapKey = linkedDataMapKey.substring(0, hashIndex);
+    }
+    
+    if (linkedDataMap.containsKey(linkedDataMapKey)) {
+      String linkedDataResourceUrl = linkedDataMap.get(linkedDataMapKey);
     
       if (linkedDataResourceUrl != null) {
-        return Collections.singletonList(linkedDataResourceUrl);
+        logger.debug("Returning {} for {}", linkedDataResourceUrl, resourceUri);
+        return Collections.singletonList(linkedDataResourceUrl+fragment);
       }
     }
+    
+    logger.debug("Returning unaltered resourceUri: {}", resourceUri);
     return Collections.singletonList(resourceUri);
   }
   
@@ -346,5 +362,9 @@ class ProxiedLinkedDataProvider extends LinkedDataProvider {
    */
   public void setLinkedDataMapping(String resourceUri, String linkedDataResourceUrl) {
     linkedDataMap.put(resourceUri, linkedDataResourceUrl);
+  }
+  
+  public void removeLinkedDataMapping(String resourceUri) {
+    linkedDataMap.remove(resourceUri);
   }
 }
