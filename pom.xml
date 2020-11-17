@@ -91,6 +91,14 @@
       <groupId>org.semarglproject</groupId>
       <artifactId>semargl-sesame</artifactId>
       <version>0.6.1</version>
+      <exclusions>
+        <!-- Excluding sesame-rio-api, because semargl-sesame uses an older version that
+            is incompatible with the version used by marmotta -->
+        <exclusion>
+          <groupId>org.openrdf.sesame</groupId>
+          <artifactId>sesame-rio-api</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
 
