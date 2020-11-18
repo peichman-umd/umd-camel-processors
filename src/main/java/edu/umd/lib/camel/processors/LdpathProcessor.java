@@ -188,6 +188,10 @@ public class LdpathProcessor implements Processor, Serializable {
     logger.debug("Removing {} from linkedDataMapKey", resourceURI);
     provider.removeLinkedDataMapping(resourceURI);
 
+    // Force the Exchange to use UTF-8, otherwise Japanese characters are not
+    // passed properly to Solr.
+    exchange.setProperty(Exchange.CHARSET_NAME, "UTF-8");
+    
     // Add the JSON result to the message
     in.setBody(jsonResult, String.class);
     in.setHeader("Content-Type", "application/json");
