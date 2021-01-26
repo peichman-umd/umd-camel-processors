@@ -20,7 +20,6 @@
     <jena.version>3.16.0</jena.version>
     <junit.version>4.13</junit.version>
     <ldpath.version>3.3.0</ldpath.version>
-    <spring.version>4.3.18.RELEASE</spring.version>
   </properties>
 
   <dependencies>
@@ -37,23 +36,11 @@
       <version>${junit.version}</version>
       <scope>test</scope>
     </dependency>
-    <dependency>
-      <groupId>org.springframework</groupId>
-      <artifactId>spring-context</artifactId>
-      <version>${spring.version}</version>
-      <scope>test</scope>
-    </dependency>
     <!-- Apache Camel -->
     <dependency>
       <groupId>org.apache.camel</groupId>
       <artifactId>camel-core</artifactId>
       <version>${camel.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.camel</groupId>
-      <artifactId>camel-test-spring</artifactId>
-      <version>${camel.version}</version>
-      <scope>test</scope>
     </dependency>
     <!-- Apache Jena -->
     <dependency>
