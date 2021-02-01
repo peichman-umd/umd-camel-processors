@@ -128,12 +128,7 @@ public class LdpathProcessor implements Processor, Serializable {
     URI resourceURIInCache = new URIImpl(resourceURI);
     ((LDCachingInfinispanBackend)cachingBackend).removeEntry(resourceURIInCache);
 
-    // Generate an authorization token
-    AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
-        exchange.getContext().getRegistry().lookupByName("addBearerAuthorization");
-    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
-    final Date oneHourHence = Date.from(now().plus(1, HOURS));
-    final String authToken = authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
+    final String authToken = getAuthToken(exchange, issuer);
 
     // Set up X-Forwarded headers
     URL resourceUrl;
@@ -203,6 +198,16 @@ public class LdpathProcessor implements Processor, Serializable {
     in.setHeader("Content-Type", "application/json");
   }
 
+  protected String getAuthToken(final Exchange exchange, final String issuer) {
+    // Generate an authorization token
+    AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
+        exchange.getContext().getRegistry().lookupByName("addBearerAuthorization");
+    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
+    final Date oneHourHence = Date.from(now().plus(1, HOURS));
+    final String authToken = authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
+    return authToken;
+  }
+
   /**
    * Returns the URL for the Linked Data representation of the given resource URI
    * or the URL of the resource URI, if no other Linked Data representation is found.
@@ -215,7 +220,7 @@ public class LdpathProcessor implements Processor, Serializable {
    * @return the URL for the Linked Data representation of the given resource URI,
    * or the URL of the resource URI, if no other Linked Data representation is found.
    */
-  private String getLinkedDataResourceUrl(String authToken, String containerBasedUri) {
+  protected String getLinkedDataResourceUrl(String authToken, String containerBasedUri) {
     String result = containerBasedUri;
 
     Objects.requireNonNull(containerBasedUri);
