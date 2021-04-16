@@ -6,7 +6,7 @@
 
   <groupId>edu.umd.lib</groupId>
   <artifactId>umd-camel-processors</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <packaging>jar</packaging>
 
   <name>umd-camel-processors</name>
@@ -17,24 +17,23 @@
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
     <camel.version>2.25.2</camel.version>
-    <jena.version>3.5.0</jena.version>
-    <!--
-    <osgi-core.version>5.0.0</osgi-core.version>
-    <osgi-compendium.version>5.0.0</osgi-compendium.version>
-    <osgi.import.packages>
-      *
-    </osgi.import.packages>
-    <osgi.export.packages>
-      edu.umd.lib.camel.*;version=${project.version}
-    </osgi.export.packages>
-    -->
+    <jena.version>3.16.0</jena.version>
+    <junit.version>4.13</junit.version>
+    <ldpath.version>3.3.0</ldpath.version>
   </properties>
 
   <dependencies>
     <dependency>
+      <groupId>edu.umd.lib</groupId>
+      <artifactId>umd-fcrepo-webapp</artifactId>
+      <version>2.5.0</version>
+      <classifier>classes</classifier>
+      <type>jar</type>
+    </dependency>
+    <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.11</version>
+      <version>${junit.version}</version>
       <scope>test</scope>
     </dependency>
     <!-- Apache Camel -->
@@ -45,69 +44,56 @@
     </dependency>
     <dependency>
       <groupId>org.apache.camel</groupId>
-      <artifactId>camel-blueprint</artifactId>
+      <artifactId>camel-test</artifactId>
       <version>${camel.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.camel</groupId>
-      <artifactId>camel-jms</artifactId>
-      <version>${camel.version}</version>
+      <scope>test</scope>
     </dependency>
     <!-- Apache Jena -->
     <dependency>
       <groupId>org.apache.jena</groupId>
-      <artifactId>apache-jena-libs</artifactId>
-      <type>pom</type>
+      <artifactId>apache-jena</artifactId>
       <version>${jena.version}</version>
+      <type>pom</type>
+      <scope>compile</scope>
+     <exclusions>
+        <!-- Exclude log4j-slf4j-impl to avoid a SLF4J conflict with ActiveMQ's
+             own bundled SLF4J library.  -->
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-slf4j-impl</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
-    <!-- OSGI -->
-    <!--
-    <dependency>
-      <groupId>org.osgi</groupId>
-      <artifactId>org.osgi.core</artifactId>
-      <version>${osgi-core.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.osgi</groupId>
-      <artifactId>org.osgi.compendium</artifactId>
-      <version>${osgi-compendium.version}</version>
-    </dependency>
-    -->
     <!-- LDPath -->
     <dependency>
       <groupId>org.apache.marmotta</groupId>
       <artifactId>ldpath-core</artifactId>
-      <version>3.3.0</version>
+      <version>${ldpath.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.marmotta</groupId>
+      <artifactId>ldclient-provider-rdf</artifactId>
+      <version>${ldpath.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.marmotta</groupId>
       <artifactId>ldpath-backend-linkeddata</artifactId>
-      <version>3.3.0</version>
+      <version>${ldpath.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.semarglproject</groupId>
+      <artifactId>semargl-sesame</artifactId>
+      <version>0.6.1</version>
+      <exclusions>
+        <!-- Excluding sesame-rio-api, because semargl-sesame uses an older version that
+            is incompatible with the version used by marmotta -->
+        <exclusion>
+          <groupId>org.openrdf.sesame</groupId>
+          <artifactId>sesame-rio-api</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <artifactId>maven-assembly-plugin</artifactId>
-        <version>2.6</version>
-        <configuration>
-          <descriptorRefs>
-            <descriptorRef>jar-with-dependencies</descriptorRef>
-          </descriptorRefs>
-        </configuration>
-        <executions>
-          <execution>
-            <id>make-assembly</id>
-            <phase>package</phase>
-            <goals>
-              <goal>single</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-    </plugins>
-  </build>
 
   <distributionManagement>
     <repository>

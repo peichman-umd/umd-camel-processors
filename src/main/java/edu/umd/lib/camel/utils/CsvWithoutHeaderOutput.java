@@ -32,7 +32,6 @@ public class CsvWithoutHeaderOutput extends CSVOutput {
       NodeToLabelMap bnodes = new NodeToLabelMap();
       w = new BufferedWriter(w);
 
-      String sep = null;
       List<String> varNames = resultSet.getResultVars();
       List<Var> vars = new ArrayList<>(varNames.size());
 
@@ -42,8 +41,8 @@ public class CsvWithoutHeaderOutput extends CSVOutput {
       }
 
       // Data output
-      for (; resultSet.hasNext();) {
-        sep = null;
+      while (resultSet.hasNext()) {
+        String sep = null;
         Binding b = resultSet.nextBinding();
 
         for (Var v : vars) {
@@ -66,7 +65,7 @@ public class CsvWithoutHeaderOutput extends CSVOutput {
   /**
    * Copied from CSVOutput
    */
-  private void output(Writer w, Node n, NodeToLabelMap bnodes) throws IOException {
+  protected void output(Writer w, Node n, NodeToLabelMap bnodes) throws IOException {
     // String str = FmtUtils.stringForNode(n) ;
     String str = "?";
     if (n.isLiteral())
@@ -83,7 +82,7 @@ public class CsvWithoutHeaderOutput extends CSVOutput {
   /**
    * Copied from CSVOutput
    */
-  private String csvSafe(String str) {
+  protected String csvSafe(String str) {
     // Apparently, there are CSV parsers that only accept "" as an escaped quote if inside a "..."
     if (str.contains("\"")
         || str.contains(",")

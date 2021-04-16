@@ -4,7 +4,9 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
 
-public class DeadLetterProcessor implements Processor {
+import java.io.Serializable;
+
+public class DeadLetterProcessor implements Processor, Serializable {
     @Override
     public void process(final Exchange exchange) {
         final Message in = exchange.getIn();
