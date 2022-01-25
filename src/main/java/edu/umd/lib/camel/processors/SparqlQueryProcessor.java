@@ -19,8 +19,8 @@ import org.apache.jena.sparql.resultset.ResultsFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
@@ -76,8 +76,8 @@ public class SparqlQueryProcessor implements Processor, Serializable {
 
   protected String executeQuery(Message in) {
     logger.debug("Executing query: {}, resultFormatName: {}", query, resultsFormatName);
-    final ByteArrayInputStream body = (ByteArrayInputStream) in.getBody();
-    logger.debug("Got input stream (Message ID: {})", in.getMessageId());
+    final InputStream body = in.getBody(InputStream.class);
+    logger.debug("Got InputStream (Message ID: {})", in.getMessageId());
     // XXX: creating the default model appears to be where the Camel route is failing
     final Model model = ModelFactory.createDefaultModel();
     logger.debug("Created default model");
