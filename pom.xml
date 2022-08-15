@@ -24,6 +24,13 @@
 
   <dependencies>
     <dependency>
+      <!-- must use httpclient 4.5.12+, so it will handle 308 redirects correctly -->
+      <!-- placed first to take precedence over versions from other libraries POMs -->
+      <groupId>org.apache.httpcomponents</groupId>
+      <artifactId>httpclient</artifactId>
+      <version>4.5.13</version>
+    </dependency>
+    <dependency>
       <groupId>edu.umd.lib</groupId>
       <artifactId>umd-fcrepo-webapp</artifactId>
       <version>2.5.0</version>
