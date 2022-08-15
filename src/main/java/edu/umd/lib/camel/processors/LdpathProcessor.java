@@ -14,9 +14,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +23,7 @@ import java.util.Set;
 
 import javax.ws.rs.core.Link;
 
+import edu.umd.lib.ldpath.ProxiedLinkedDataProvider;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
@@ -126,7 +125,7 @@ public class LdpathProcessor implements Processor, Serializable {
     // Remove the resourceURI from the cache, as it is being updated (and any
     // cache entry is now stale).
     URI resourceURIInCache = new URIImpl(resourceURI);
-    ((LDCachingInfinispanBackend)cachingBackend).removeEntry(resourceURIInCache);
+    cachingBackend.removeEntry(resourceURIInCache);
 
     final String authToken = getAuthToken(exchange, issuer);
 
@@ -204,8 +203,7 @@ public class LdpathProcessor implements Processor, Serializable {
         exchange.getContext().getRegistry().lookupByName("addBearerAuthorization");
     final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
     final Date oneHourHence = Date.from(now().plus(1, HOURS));
-    final String authToken = authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
-    return authToken;
+    return authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
   }
 
   /**
@@ -221,8 +219,6 @@ public class LdpathProcessor implements Processor, Serializable {
    * or the URL of the resource URI, if no other Linked Data representation is found.
    */
   protected String getLinkedDataResourceUrl(String authToken, String containerBasedUri) {
-    String result = containerBasedUri;
-
     Objects.requireNonNull(containerBasedUri);
 
     // Create a new HttpClient with the authorization token
@@ -267,8 +263,8 @@ public class LdpathProcessor implements Processor, Serializable {
       logger.error("I/O error retrieving HEAD {}", containerBasedUri);
     }
 
-    logger.debug("Returning LinkedDataResourceUrl of {}", result);
-    return result;
+    logger.debug("Returning LinkedDataResourceUrl of {}", containerBasedUri);
+    return containerBasedUri;
   }
 
   /**
@@ -315,121 +311,5 @@ public class LdpathProcessor implements Processor, Serializable {
    */
   public void setQuery(String query) {
     this.query = query;
-  }
-}
-
-/**
-* LinkedDataProvider implementation that overrides the request URL, based on
-* a URL provided in a Map.
-*
-* This enables an "internal" container-based URL to be used for retrieving the
-* resource, while maintaining the expected URL for the RDF triples.
-*
-* This class relies on the "REPO_INTERNAL_URL" and "REPO_EXTERNAL_URL" environment
-* variables to properly convert URLs.
-*/
-class ProxiedLinkedDataProvider extends LinkedDataProvider {
-  private static final Logger logger = LoggerFactory.getLogger(ProxiedLinkedDataProvider.class);
-
-  public static final String PROVIDER_NAME = "Proxied Linked Data";
-
-  private static Map<String, String> linkedDataMap = new HashMap<>();
-
-  private static String repoInternalUrl;
-
-  private static String repoExternalUrl;
-
-
-  public ProxiedLinkedDataProvider() {
-    String repoInternalUrl = System.getenv("REPO_INTERNAL_URL");
-    if (repoInternalUrl == null) {
-      repoInternalUrl = "http://repository:8080/rest";
-      logger.warn("REPO_INTERNAL_URL environment variable not set. Using default of '{}", repoInternalUrl);
-    }
-    ProxiedLinkedDataProvider.repoInternalUrl = repoInternalUrl;
-
-    String repoExternalUrl = System.getenv("REPO_EXTERNAL_URL");
-    if (repoExternalUrl == null) {
-      repoExternalUrl = "http://localhost:8080/rest";
-      logger.warn("REPO_EXTERNAL_URL environment variable not set. Using default of '{}", repoExternalUrl);
-    }
-    ProxiedLinkedDataProvider.repoExternalUrl = repoExternalUrl;
-  }
-
-  @Override
-  public String getName() {
-    return PROVIDER_NAME;
-  }
-
-  /**
-   * Returns either the linked data resource URL (if in the linkedDataMap), or
-   * the given resourceURI,
-   *
-   * @param resourceUri the "external" URI of the resource being queried
-   * @param endpoint the Endpoint associated with the request.
-   */
-  public List<String> buildRequestUrl(final String resourceUri, final Endpoint endpoint) {
-    String linkedDataMapKey = resourceUri;
-    String fragment="";
-    if (linkedDataMapKey.contains("#")) {
-      logger.debug("Stripping fragment from {}", linkedDataMapKey);
-      // Strip off any URL fragments, as linkedDataMap keys won't have them.
-      int hashIndex = resourceUri.indexOf("#");
-      fragment = resourceUri.substring(hashIndex);
-      linkedDataMapKey = linkedDataMapKey.substring(0, hashIndex);
-    }
-
-    if (linkedDataMap.containsKey(linkedDataMapKey)) {
-      String linkedDataResourceUrl = linkedDataMap.get(linkedDataMapKey);
-
-      if (linkedDataResourceUrl != null) {
-        logger.debug("Returning {} for {}", linkedDataResourceUrl, resourceUri);
-        return Collections.singletonList(linkedDataResourceUrl+fragment);
-      }
-    }
-
-    // Sometimes resources come through without being in the linkedDataMapKey
-    // (not sure how this happens -- might be node traversal in LDPath?)
-    logger.debug("resourceURL of '{}' not found in linkedDataMap.", resourceUri);
-
-    URL resourceURL;
-    try {
-      resourceURL = new URL(resourceUri);
-    } catch (MalformedURLException e) {
-      logger.error("Malformed URL: {}", resourceUri);
-      throw new IllegalArgumentException("Malformed URL: " + resourceUri, e);
-    }
-
-    // If link does not match externalRepoUrl, then just return it
-    if (!resourceURL.toString().startsWith(repoExternalUrl)) {
-      logger.debug("resourceURL does not match repoExternalUrl, return '{}'", resourceURL);
-      return Collections.singletonList(resourceURL.toString());
-    }
-
-    // Otherwise, it matches, so use the repoInternalUrl to rewrite the resource,
-    final String internalURL = new URIBuilder(repoInternalUrl)
-        .setPath(resourceURL.getPath())
-        .setEncodedQuery(resourceURL.getQuery())
-        .build()
-        .toString();
-
-    logger.debug("Returning modified URL of: {}", internalURL);
-    return Collections.singletonList(internalURL);
-  }
-
-  /**
-   * Sets a mapping between the "external" resourceUri, and the "internal"
-   * linkedDataResourceUrl. The mapping will be removed when the
-   * "buildRequestUrl" method is called.
-   *
-   * @param resourceUri the "external" resourceUri
-   * @param linkedDataResourceUrl the "internal" URL of the RDF metadata.
-   */
-  public void setLinkedDataMapping(String resourceUri, String linkedDataResourceUrl) {
-    linkedDataMap.put(resourceUri, linkedDataResourceUrl);
-  }
-
-  public void removeLinkedDataMapping(String resourceUri) {
-    linkedDataMap.remove(resourceUri);
   }
 }
