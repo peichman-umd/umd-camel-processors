@@ -151,8 +151,10 @@ public class LdpathProcessor implements Processor, Serializable {
     headers.add(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
     headers.add(new BasicHeader("X-Forwarded-Host", forwardedHost));
     headers.add(new BasicHeader("X-Forwarded-Proto", forwardedProto));
-    for (Header h : headers) {
-      logger.info("HTTP client header: {}: {}", h.getName(), h.getValue());
+    if (logger.isDebugEnabled()) {
+      for (final Header h : headers) {
+        logger.debug("HTTP client header: {}: {}", h.getName(), h.getValue());
+      }
     }
 
     // Configure HttpClient for making resource request
@@ -170,7 +172,7 @@ public class LdpathProcessor implements Processor, Serializable {
     final LDCacheBackend cacheBackend = new LDCacheBackend(new LDCache(cacheConfig, cachingBackend));
     final LDPath<Value> ldpath = new LDPath<>(cacheBackend);
 
-    logger.info("Sending request to {} for {}", containerBasedUri, resourceURI);
+    logger.debug("Sending request to {} for {}", containerBasedUri, resourceURI);
     logger.debug("LDPath query: {}", query);
     String jsonResult;
     try {
@@ -236,7 +238,7 @@ public class LdpathProcessor implements Processor, Serializable {
       String describedBy = null;
       boolean nonRdfSource = false;
       for (Header h: headers) {
-        logger.debug("header:{} ", h);
+        logger.debug("Response header: {}: {}", h.getName(), h.getValue());
         if ("link".equalsIgnoreCase(h.getName())) {
           Link link = Link.valueOf(h.getValue());
           String rel = link.getRel();
