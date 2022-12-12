@@ -123,19 +123,10 @@ public class LdpathProcessor implements Processor, Serializable {
       return;
     }
 
-    String forwardedProto = resourceUrl.getProtocol();
-    String forwardedHost = resourceUrl.getHost();
-    int forwardedPort = resourceUrl.getPort();
-    if (forwardedPort != -1) {
-      // Note: Using "X-Forwarded-Port" header does not seem to be recognized,
-      // so appending the port to the host.
-      forwardedHost = forwardedHost + ":"+ forwardedPort;
-    }
-
     final List<Header> headers = new ArrayList<>();
     headers.add(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
-    headers.add(new BasicHeader("X-Forwarded-Host", forwardedHost));
-    headers.add(new BasicHeader("X-Forwarded-Proto", forwardedProto));
+    headers.add(new BasicHeader("X-Forwarded-Host", getForwardedHost(resourceUrl)));
+    headers.add(new BasicHeader("X-Forwarded-Proto", resourceUrl.getProtocol()));
     if (logger.isDebugEnabled()) {
       for (final Header h : headers) {
         logger.debug("HTTP client header: {}: {}", h.getName(), h.getValue());
@@ -280,6 +271,17 @@ public class LdpathProcessor implements Processor, Serializable {
    */
   private String execute(final LDPath<Value> ldpath, final String uri) throws LDPathParseException, JsonProcessingException {
     return objectMapper.writeValueAsString(executeQuery(ldpath, uri));
+  }
+
+  private String getForwardedHost(final URL resourceUrl) {
+    final int forwardedPort = resourceUrl.getPort();
+    if (forwardedPort != -1) {
+      // Note: Using "X-Forwarded-Port" header does not seem to be recognized,
+      // so appending the port to the host.
+      return resourceUrl.getHost() + ":" + forwardedPort;
+    } else {
+      return resourceUrl.getHost();
+    }
   }
 
   /**
