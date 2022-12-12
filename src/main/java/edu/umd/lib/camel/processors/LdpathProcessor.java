@@ -1,28 +1,8 @@
 package edu.umd.lib.camel.processors;
 
-import static edu.umd.lib.camel.processors.AddBearerAuthorizationProcessor.USERNAME_HEADER_NAME;
-import static edu.umd.lib.fcrepo.LdapRoleLookupService.ADMIN_ROLE;
-import static java.time.Instant.now;
-import static java.time.temporal.ChronoUnit.HOURS;
-import static org.apache.http.HttpHeaders.AUTHORIZATION;
-import static org.apache.marmotta.ldclient.api.endpoint.Endpoint.PRIORITY_HIGH;
-
-import java.io.IOException;
-import java.io.Serializable;
-import java.io.StringReader;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-
-import javax.ws.rs.core.Link;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.umd.lib.fcrepo.AuthTokenService;
 import edu.umd.lib.ldpath.ProxiedLinkedDataProvider;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
@@ -32,6 +12,7 @@ import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpHead;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicHeader;
 import org.apache.marmotta.ldcache.api.LDCachingBackend;
@@ -42,31 +23,37 @@ import org.apache.marmotta.ldclient.api.endpoint.Endpoint;
 import org.apache.marmotta.ldclient.api.provider.DataProvider;
 import org.apache.marmotta.ldclient.endpoint.rdf.LinkedDataEndpoint;
 import org.apache.marmotta.ldclient.model.ClientConfiguration;
-import org.apache.marmotta.ldclient.provider.rdf.LinkedDataProvider;
 import org.apache.marmotta.ldpath.LDPath;
 import org.apache.marmotta.ldpath.backend.linkeddata.LDCacheBackend;
 import org.apache.marmotta.ldpath.exception.LDPathParseException;
-import org.jasig.cas.client.util.URIBuilder;
 import org.openrdf.model.Value;
-import org.openrdf.model.URI;
 import org.openrdf.model.impl.URIImpl;
-import org.openrdf.repository.RepositoryException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import javax.ws.rs.core.Link;
+import java.io.IOException;
+import java.io.Serializable;
+import java.io.StringReader;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.*;
 
-import edu.umd.lib.fcrepo.AuthTokenService;
+import static edu.umd.lib.camel.processors.AddBearerAuthorizationProcessor.USERNAME_HEADER_NAME;
+import static edu.umd.lib.fcrepo.LdapRoleLookupService.ADMIN_ROLE;
+import static java.time.Instant.now;
+import static java.time.temporal.ChronoUnit.HOURS;
+import static org.apache.http.HttpHeaders.AUTHORIZATION;
+import static org.apache.marmotta.ldclient.api.endpoint.Endpoint.PRIORITY_HIGH;
 
 /**
  * Processor that converts RDF triples into JSON, using an Apache Marmotta
  * LDPath template.
- *
+ * <p>
  * When processing non-RDF resources (such as a PDF binary file), the
  * processor will use the "describedBy" link in the HTTP headers to
  * retrieve the RDF metadata.
- *
+ * <p>
  * Note: This processor is intended for use in a Docker Swarm or Kubernetes
  * stack, where the fcrepo web application is available on an "internal"
  * container-based URL, which is separate from the "external" URL.
@@ -92,10 +79,9 @@ public class LdpathProcessor implements Processor, Serializable {
 
   private final ClientConfiguration clientConfig;
 
-
   final ProxiedLinkedDataProvider provider;
 
-  public LdpathProcessor() throws RepositoryException {
+  public LdpathProcessor() {
     clientConfig = new ClientConfiguration();
     cachingBackend = new LDCachingInfinispanBackend();
     cachingBackend.initialize();
@@ -124,8 +110,7 @@ public class LdpathProcessor implements Processor, Serializable {
 
     // Remove the resourceURI from the cache, as it is being updated (and any
     // cache entry is now stale).
-    URI resourceURIInCache = new URIImpl(resourceURI);
-    cachingBackend.removeEntry(resourceURIInCache);
+    cachingBackend.removeEntry(new URIImpl(resourceURI));
 
     final String authToken = getAuthToken(exchange, issuer);
 
@@ -203,7 +188,7 @@ public class LdpathProcessor implements Processor, Serializable {
     // Generate an authorization token
     AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
         exchange.getContext().getRegistry().lookupByName("addBearerAuthorization");
-    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
+    final AuthTokenService authTokenService = addBearerAuthProcessor.getAuthTokenService();
     final Date oneHourHence = Date.from(now().plus(1, HOURS));
     return authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
   }
@@ -211,7 +196,7 @@ public class LdpathProcessor implements Processor, Serializable {
   /**
    * Returns the URL for the Linked Data representation of the given resource URI
    * or the URL of the resource URI, if no other Linked Data representation is found.
-   *
+   * <p>
    * For non-RDF resources, this method looks for a "describedBy" link in the headers
    * returned by an HTTP HEAD request, and returns the value, if found.
    *
@@ -227,10 +212,10 @@ public class LdpathProcessor implements Processor, Serializable {
     //
     // Note: Can't use HttpClient from "process" because the "X-Forwarded" headers
     // will cause the URL to be returned with the host in the header.
-    HttpClient httpClient = HttpClientBuilder.create().build();
-    final HttpHead request = new HttpHead(containerBasedUri);
-    request.addHeader(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
-    try {
+    try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+      final HttpHead request = new HttpHead(containerBasedUri);
+      request.addHeader(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
+
       final HttpResponse response = httpClient.execute(request);
       logger.debug("Got: {} for HEAD {}", response.getStatusLine().getStatusCode(), containerBasedUri);
 
@@ -258,7 +243,7 @@ public class LdpathProcessor implements Processor, Serializable {
 
       if (nonRdfSource && (describedBy != null)) {
         logger.debug("For non-RDF resource {}, returning LinkedDataResourceUrl from 'describedBy' URI of {}",
-            containerBasedUri, describedBy);
+                containerBasedUri, describedBy);
         return describedBy;
       }
     } catch(IOException ioe) {
