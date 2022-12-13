@@ -1,28 +1,9 @@
 package edu.umd.lib.camel.processors;
 
-import static edu.umd.lib.camel.processors.AddBearerAuthorizationProcessor.USERNAME_HEADER_NAME;
-import static edu.umd.lib.fcrepo.LdapRoleLookupService.ADMIN_ROLE;
-import static java.time.Instant.now;
-import static java.time.temporal.ChronoUnit.HOURS;
-import static org.apache.http.HttpHeaders.AUTHORIZATION;
-import static org.apache.marmotta.ldclient.api.endpoint.Endpoint.PRIORITY_HIGH;
-
-import java.io.IOException;
-import java.io.Serializable;
-import java.io.StringReader;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-
-import javax.ws.rs.core.Link;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.umd.lib.camel.utils.LinkHeaders;
+import edu.umd.lib.fcrepo.AuthTokenService;
 import edu.umd.lib.ldpath.ProxiedLinkedDataProvider;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
@@ -32,6 +13,7 @@ import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpHead;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicHeader;
 import org.apache.marmotta.ldcache.api.LDCachingBackend;
@@ -42,31 +24,36 @@ import org.apache.marmotta.ldclient.api.endpoint.Endpoint;
 import org.apache.marmotta.ldclient.api.provider.DataProvider;
 import org.apache.marmotta.ldclient.endpoint.rdf.LinkedDataEndpoint;
 import org.apache.marmotta.ldclient.model.ClientConfiguration;
-import org.apache.marmotta.ldclient.provider.rdf.LinkedDataProvider;
 import org.apache.marmotta.ldpath.LDPath;
 import org.apache.marmotta.ldpath.backend.linkeddata.LDCacheBackend;
 import org.apache.marmotta.ldpath.exception.LDPathParseException;
-import org.jasig.cas.client.util.URIBuilder;
 import org.openrdf.model.Value;
-import org.openrdf.model.URI;
 import org.openrdf.model.impl.URIImpl;
-import org.openrdf.repository.RepositoryException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.io.Serializable;
+import java.io.StringReader;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.*;
 
-import edu.umd.lib.fcrepo.AuthTokenService;
+import static edu.umd.lib.camel.processors.AddBearerAuthorizationProcessor.USERNAME_HEADER_NAME;
+import static edu.umd.lib.fcrepo.LdapRoleLookupService.ADMIN_ROLE;
+import static java.time.Instant.now;
+import static java.time.temporal.ChronoUnit.HOURS;
+import static org.apache.http.HttpHeaders.AUTHORIZATION;
+import static org.apache.marmotta.ldclient.api.endpoint.Endpoint.PRIORITY_HIGH;
 
 /**
  * Processor that converts RDF triples into JSON, using an Apache Marmotta
  * LDPath template.
- *
+ * <p>
  * When processing non-RDF resources (such as a PDF binary file), the
  * processor will use the "describedBy" link in the HTTP headers to
  * retrieve the RDF metadata.
- *
+ * <p>
  * Note: This processor is intended for use in a Docker Swarm or Kubernetes
  * stack, where the fcrepo web application is available on an "internal"
  * container-based URL, which is separate from the "external" URL.
@@ -92,10 +79,9 @@ public class LdpathProcessor implements Processor, Serializable {
 
   private final ClientConfiguration clientConfig;
 
-
   final ProxiedLinkedDataProvider provider;
 
-  public LdpathProcessor() throws RepositoryException {
+  public LdpathProcessor() {
     clientConfig = new ClientConfiguration();
     cachingBackend = new LDCachingInfinispanBackend();
     cachingBackend.initialize();
@@ -124,8 +110,7 @@ public class LdpathProcessor implements Processor, Serializable {
 
     // Remove the resourceURI from the cache, as it is being updated (and any
     // cache entry is now stale).
-    URI resourceURIInCache = new URIImpl(resourceURI);
-    cachingBackend.removeEntry(resourceURIInCache);
+    cachingBackend.removeEntry(new URIImpl(resourceURI));
 
     final String authToken = getAuthToken(exchange, issuer);
 
@@ -138,21 +123,14 @@ public class LdpathProcessor implements Processor, Serializable {
       return;
     }
 
-    String forwardedProto = resourceUrl.getProtocol();
-    String forwardedHost = resourceUrl.getHost();
-    int forwardedPort = resourceUrl.getPort();
-    if (forwardedPort != -1) {
-      // Note: Using "X-Forwarded-Port" header does not seem to be recognized,
-      // so appending the port to the host.
-      forwardedHost = forwardedHost + ":"+ forwardedPort;
-    }
-
     final List<Header> headers = new ArrayList<>();
     headers.add(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
-    headers.add(new BasicHeader("X-Forwarded-Host", forwardedHost));
-    headers.add(new BasicHeader("X-Forwarded-Proto", forwardedProto));
-    for (Header h : headers) {
-      logger.info("HTTP client header: {}: {}", h.getName(), h.getValue());
+    headers.add(new BasicHeader("X-Forwarded-Host", getForwardedHost(resourceUrl)));
+    headers.add(new BasicHeader("X-Forwarded-Proto", resourceUrl.getProtocol()));
+    if (logger.isDebugEnabled()) {
+      for (final Header h : headers) {
+        logger.debug("HTTP client header: {}: {}", h.getName(), h.getValue());
+      }
     }
 
     // Configure HttpClient for making resource request
@@ -170,7 +148,7 @@ public class LdpathProcessor implements Processor, Serializable {
     final LDCacheBackend cacheBackend = new LDCacheBackend(new LDCache(cacheConfig, cachingBackend));
     final LDPath<Value> ldpath = new LDPath<>(cacheBackend);
 
-    logger.info("Sending request to {} for {}", containerBasedUri, resourceURI);
+    logger.debug("Sending request to {} for {}", containerBasedUri, resourceURI);
     logger.debug("LDPath query: {}", query);
     String jsonResult;
     try {
@@ -201,7 +179,7 @@ public class LdpathProcessor implements Processor, Serializable {
     // Generate an authorization token
     AddBearerAuthorizationProcessor addBearerAuthProcessor = (AddBearerAuthorizationProcessor)
         exchange.getContext().getRegistry().lookupByName("addBearerAuthorization");
-    final AuthTokenService authTokenService = (AuthTokenService) addBearerAuthProcessor.getAuthTokenService();
+    final AuthTokenService authTokenService = addBearerAuthProcessor.getAuthTokenService();
     final Date oneHourHence = Date.from(now().plus(1, HOURS));
     return authTokenService.createToken("camel-ldpath", issuer, oneHourHence, ADMIN_ROLE);
   }
@@ -209,7 +187,7 @@ public class LdpathProcessor implements Processor, Serializable {
   /**
    * Returns the URL for the Linked Data representation of the given resource URI
    * or the URL of the resource URI, if no other Linked Data representation is found.
-   *
+   * <p>
    * For non-RDF resources, this method looks for a "describedBy" link in the headers
    * returned by an HTTP HEAD request, and returns the value, if found.
    *
@@ -225,38 +203,26 @@ public class LdpathProcessor implements Processor, Serializable {
     //
     // Note: Can't use HttpClient from "process" because the "X-Forwarded" headers
     // will cause the URL to be returned with the host in the header.
-    HttpClient httpClient = HttpClientBuilder.create().build();
-    final HttpHead request = new HttpHead(containerBasedUri);
-    request.addHeader(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
-    try {
+    try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+      final HttpHead request = new HttpHead(containerBasedUri);
+      request.addHeader(new BasicHeader(AUTHORIZATION, "Bearer " + authToken));
+
       final HttpResponse response = httpClient.execute(request);
       logger.debug("Got: {} for HEAD {}", response.getStatusLine().getStatusCode(), containerBasedUri);
 
-      Header[] headers = response.getAllHeaders();
-      String describedBy = null;
-      boolean nonRdfSource = false;
-      for (Header h: headers) {
-        logger.debug("header:{} ", h);
-        if ("link".equalsIgnoreCase(h.getName())) {
-          Link link = Link.valueOf(h.getValue());
-          String rel = link.getRel();
-
-          if ("describedby".equalsIgnoreCase(rel)) {
-            describedBy = link.getUri().toString();
-          }
-
-          if ("type".equalsIgnoreCase(rel)) {
-            String type = link.getUri().toString();
-            if (type.contains(NON_RDF_SOURCE_URI)) {
-              nonRdfSource = true;
-            }
-          }
+      final Header[] responseHeaders = response.getAllHeaders();
+      if (logger.isDebugEnabled()) {
+        for (Header h : responseHeaders) {
+          logger.debug("Response header: {}: {}", h.getName(), h.getValue());
         }
       }
+      final LinkHeaders linkHeaders = new LinkHeaders(responseHeaders);
+      final String describedBy = linkHeaders.getUriByRel("describedby").toString();
+      final boolean nonRdfSource = linkHeaders.contains("type", NON_RDF_SOURCE_URI);
 
       if (nonRdfSource && (describedBy != null)) {
         logger.debug("For non-RDF resource {}, returning LinkedDataResourceUrl from 'describedBy' URI of {}",
-            containerBasedUri, describedBy);
+                containerBasedUri, describedBy);
         return describedBy;
       }
     } catch(IOException ioe) {
@@ -293,6 +259,17 @@ public class LdpathProcessor implements Processor, Serializable {
    */
   private String execute(final LDPath<Value> ldpath, final String uri) throws LDPathParseException, JsonProcessingException {
     return objectMapper.writeValueAsString(executeQuery(ldpath, uri));
+  }
+
+  private String getForwardedHost(final URL resourceUrl) {
+    final int forwardedPort = resourceUrl.getPort();
+    if (forwardedPort != -1) {
+      // Note: Using "X-Forwarded-Port" header does not seem to be recognized,
+      // so appending the port to the host.
+      return resourceUrl.getHost() + ":" + forwardedPort;
+    } else {
+      return resourceUrl.getHost();
+    }
   }
 
   /**

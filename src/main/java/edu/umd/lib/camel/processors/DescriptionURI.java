@@ -1,13 +1,14 @@
 package edu.umd.lib.camel.processors;
 
+import edu.umd.lib.camel.utils.LinkHeaders;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.core.Link;
 import java.io.Serializable;
+import java.net.URI;
 import java.util.List;
 
 public class DescriptionURI implements Processor, Serializable {
@@ -18,17 +19,19 @@ public class DescriptionURI implements Processor, Serializable {
   @Override
   public void process(Exchange exchange) {
     final Message in = exchange.getIn();
-    final List<?> linkHeaders = in.getHeader("Link", List.class);
-    logger.debug("Link headers: {}", linkHeaders);
-    for (final Object h : linkHeaders) {
-      logger.debug("Parsing header: {}", h);
-      final Link link = Link.valueOf((String) h);
-      logger.debug("URI = {}", link.getUri());
-      logger.debug("Rel = {}", link.getRel());
-      if (link.getRel().equals("describedby")) {
-        in.setHeader(DESCRIBED_BY_HEADER, link.getUri().toString());
-        break;
+    final List<?> incomingLinkHeaders = in.getHeader("Link", List.class);
+
+    if (logger.isDebugEnabled()) {
+      for (final Object h : incomingLinkHeaders) {
+        logger.debug("Incoming Link header: {}", h);
       }
+    }
+
+    final LinkHeaders linkHeaders = new LinkHeaders(incomingLinkHeaders);
+
+    final URI describedByUri = linkHeaders.getUriByRel("describedby");
+    if (describedByUri != null) {
+      in.setHeader(DESCRIBED_BY_HEADER, describedByUri.toString());
     }
   }
 }
