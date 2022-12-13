@@ -2,6 +2,7 @@ package edu.umd.lib.camel.processors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.umd.lib.camel.utils.LinkHeaders;
 import edu.umd.lib.fcrepo.AuthTokenService;
 import edu.umd.lib.ldpath.ProxiedLinkedDataProvider;
 import org.apache.camel.Exchange;
@@ -31,7 +32,6 @@ import org.openrdf.model.impl.URIImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.core.Link;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.StringReader;
@@ -210,27 +210,15 @@ public class LdpathProcessor implements Processor, Serializable {
       final HttpResponse response = httpClient.execute(request);
       logger.debug("Got: {} for HEAD {}", response.getStatusLine().getStatusCode(), containerBasedUri);
 
-      Header[] headers = response.getAllHeaders();
-      String describedBy = null;
-      boolean nonRdfSource = false;
-      for (Header h: headers) {
-        logger.debug("Response header: {}: {}", h.getName(), h.getValue());
-        if ("link".equalsIgnoreCase(h.getName())) {
-          Link link = Link.valueOf(h.getValue());
-          String rel = link.getRel();
-
-          if ("describedby".equalsIgnoreCase(rel)) {
-            describedBy = link.getUri().toString();
-          }
-
-          if ("type".equalsIgnoreCase(rel)) {
-            String type = link.getUri().toString();
-            if (type.contains(NON_RDF_SOURCE_URI)) {
-              nonRdfSource = true;
-            }
-          }
+      final Header[] responseHeaders = response.getAllHeaders();
+      if (logger.isDebugEnabled()) {
+        for (Header h : responseHeaders) {
+          logger.debug("Response header: {}: {}", h.getName(), h.getValue());
         }
       }
+      final LinkHeaders linkHeaders = new LinkHeaders(responseHeaders);
+      final String describedBy = linkHeaders.getUriByRel("describedby").toString();
+      final boolean nonRdfSource = linkHeaders.contains("type", NON_RDF_SOURCE_URI);
 
       if (nonRdfSource && (describedBy != null)) {
         logger.debug("For non-RDF resource {}, returning LinkedDataResourceUrl from 'describedBy' URI of {}",
