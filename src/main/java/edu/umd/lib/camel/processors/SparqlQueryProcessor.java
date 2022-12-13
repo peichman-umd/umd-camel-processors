@@ -46,20 +46,20 @@ public class SparqlQueryProcessor implements Processor, Serializable {
     final Map<String, RDFNode> bindings = new HashMap<>();
 
     // process headers for runtime bindings
-    logger.info("Checking headers for binding definitions");
+    logger.debug("Checking headers for binding definitions");
     for (Map.Entry<String, Object> entry : message.getHeaders().entrySet()) {
       final String key = entry.getKey();
       logger.trace("Found key {}", key);
       if (key.matches("^CamelSparqlQueryBinding-Literal-.+")) {
         final String bindingName = extractBindingName(key);
         final String bindingValue = (String) entry.getValue();
-        logger.info("Binding ?{} to literal: \"{}\"", bindingName, bindingValue);
+        logger.debug("Binding ?{} to literal: \"{}\"", bindingName, bindingValue);
         bindings.put(bindingName, model.createLiteral(bindingValue));
       }
       if (key.matches("^CamelSparqlQueryBinding-URI-.+")) {
         final String bindingName = extractBindingName(key);
         final String bindingValue = (String) entry.getValue();
-        logger.info("Binding ?{} to URI {}", bindingName, bindingValue);
+        logger.debug("Binding ?{} to URI {}", bindingName, bindingValue);
         bindings.put(bindingName, model.createResource(bindingValue));
       }
     }
