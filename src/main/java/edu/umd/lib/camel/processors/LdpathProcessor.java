@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.io.StringReader;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.util.*;
 
@@ -217,13 +218,13 @@ public class LdpathProcessor implements Processor, Serializable {
         }
       }
       final LinkHeaders linkHeaders = new LinkHeaders(responseHeaders);
-      final String describedBy = linkHeaders.getUriByRel("describedby").toString();
+      final URI describedBy = linkHeaders.getUriByRel("describedby");
       final boolean nonRdfSource = linkHeaders.contains("type", NON_RDF_SOURCE_URI);
 
       if (nonRdfSource && (describedBy != null)) {
         logger.debug("For non-RDF resource {}, returning LinkedDataResourceUrl from 'describedBy' URI of {}",
                 containerBasedUri, describedBy);
-        return describedBy;
+        return describedBy.toString();
       }
     } catch(IOException ioe) {
       logger.error("I/O error retrieving HEAD {}", containerBasedUri);
